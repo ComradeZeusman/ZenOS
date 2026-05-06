@@ -3,6 +3,7 @@
 #include "keyboard.h"
 #include "timer.h"
 #include "pmm.h"
+#include "task.h"
 
 /* ── Configuration ───────────────────────────────────────────────────── */
 #define CMD_BUF_SIZE 128u   /* maximum input line length (incl. NUL)      */
@@ -39,6 +40,7 @@ static void cmd_help(void) {
     terminal_writestring("  clear   — clear the screen\n");
     terminal_writestring("  uptime  — seconds elapsed since boot\n");
     terminal_writestring("  mem     — free / total physical memory frames\n");
+    terminal_writestring("  tasks   — list all running tasks\n");
     terminal_writestring("  reboot  — reboot the machine\n");
 }
 
@@ -62,6 +64,10 @@ static void cmd_mem(void) {
     terminal_writestring(" frames  total=");
     print_uint32(pmm_get_total_frames());
     terminal_writestring(" frames  (1 frame = 4 KiB)\n");
+}
+
+static void cmd_tasks(void) {
+    task_list();
 }
 
 static void cmd_reboot(void) {
@@ -96,6 +102,7 @@ static const shell_cmd_t commands[] = {
     { "clear",  cmd_clear  },
     { "uptime", cmd_uptime },
     { "mem",    cmd_mem    },
+    { "tasks",  cmd_tasks  },
     { "reboot", cmd_reboot },
 };
 

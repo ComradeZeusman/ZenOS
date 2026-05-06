@@ -10,6 +10,7 @@
 #include "timer.h"
 #include "shell.h"
 #include "klog.h"
+#include "task.h"
 
 // Function prototypes
 void panic(const char* message);
@@ -54,6 +55,9 @@ void kernel_main(uint32_t mb_magic, multiboot_info_t *mbi) {
 
     timer_init(100);
     KLOG_INFO("PIT timer running @ 100 Hz");
+
+    task_init();
+    KLOG_INFO("Task scheduler ready");
 
     __asm__ volatile("sti");
 

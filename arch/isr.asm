@@ -73,6 +73,19 @@ ISR_NOERRCODE 47    ; IRQ15 – Secondary ATA / spurious
 
 extern isr_handler
 
+; ── Scheduler context-switch hook variables (defined in kernel/task.c) ──
+;
+; task_schedule() arms these two variables when it wants a task switch.
+; isr_common_stub reads them after every isr_handler() call and, if
+; sched_next_esp is non-zero, performs the ESP swap before restoring
+; registers and issuing IRET.
+;
+;   sched_next_esp  uint32_t   – new task's ESP to load, or 0 (no switch)
+;   sched_save_esp  uint32_t * – pointer to current task's kernel_esp field
+;
+extern sched_next_esp
+extern sched_save_esp
+
 ; Common stub called by all ISR stubs.
 ; Stack on entry (low → high address):
 ;   int_no | err_code | eip | cs | eflags   (CPU-pushed items are at higher addresses)
@@ -92,6 +105,23 @@ isr_common_stub:
     push esp                ; pass pointer to registers_t as first argument
     call isr_handler
     add esp, 4              ; discard the pointer argument
+
+    ; ── Context-switch hook ─────────────────────────────────────────────
+    ; If task_schedule() set sched_next_esp we swap stacks right now.
+    ; At this point ESP points at registers_t.ds – the bottom of the full
+    ; interrupt frame.  Saving/restoring it is all we need; POPA + IRET
+    ; below will complete the restore from whichever stack ESP ends up on.
+    mov  eax, [sched_next_esp]
+    test eax, eax
+    jz   .cs_done
+
+    mov  ecx, [sched_save_esp]   ; ecx = &current_task->kernel_esp
+    mov  [ecx], esp              ; save current ESP (= &registers_t.ds)
+    mov  esp, eax                ; switch to next task's saved frame
+    mov  dword [sched_next_esp], 0  ; clear the pending-switch flag
+
+.cs_done:
+    ; ────────────────────────────────────────────────────────────────────
 
     pop eax                 ; restore original data segment
     mov ds, ax
