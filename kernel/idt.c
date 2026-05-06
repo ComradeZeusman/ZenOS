@@ -1,5 +1,6 @@
 #include "idt.h"
 #include "pic.h"
+#include "terminal.h"
 
 #define IDT_ENTRIES 256
 
@@ -44,9 +45,34 @@ static const char *exception_messages[32] = {
     "Reserved"                    /* 31     */
 };
 
-/* Forward declarations of kernel functions used here */
-extern void terminal_writestring(const char *str);
+/* Forward declaration – defined in kernel.c */
 extern void panic(const char *message);
+
+/*
+ * dump_registers – print the full CPU state captured at interrupt time.
+ * Assumes the terminal colour has already been set to something visible
+ * (e.g. white on red) by the caller.
+ */
+static void dump_registers(const registers_t *regs)
+{
+    terminal_writestring("  EAX="); terminal_writehex32(regs->eax);
+    terminal_writestring("  EBX="); terminal_writehex32(regs->ebx);
+    terminal_writestring("  ECX="); terminal_writehex32(regs->ecx);
+    terminal_writestring("  EDX="); terminal_writehex32(regs->edx);
+    terminal_putchar('\n');
+    terminal_writestring("  ESI="); terminal_writehex32(regs->esi);
+    terminal_writestring("  EDI="); terminal_writehex32(regs->edi);
+    terminal_writestring("  EBP="); terminal_writehex32(regs->ebp);
+    terminal_writestring("  ESP="); terminal_writehex32(regs->esp);
+    terminal_putchar('\n');
+    terminal_writestring("  EIP="); terminal_writehex32(regs->eip);
+    terminal_writestring("  CS ="); terminal_writehex32(regs->cs);
+    terminal_writestring("  DS ="); terminal_writehex32(regs->ds);
+    terminal_putchar('\n');
+    terminal_writestring("  EFLAGS="); terminal_writehex32(regs->eflags);
+    terminal_writestring("  ERR=");    terminal_writehex32(regs->err_code);
+    terminal_putchar('\n');
+}
 
 void idt_set_gate(uint8_t num, uint32_t base, uint16_t selector, uint8_t flags) {
     idt[num].base_low  = base & 0xFFFF;
@@ -140,19 +166,35 @@ void irq_register_handler(uint8_t irq, irq_handler_t handler) {
 
 void isr_handler(registers_t *regs) {
     if (regs->int_no < 32) {
-        /* CPU exception */
-        terminal_writestring("EXCEPTION: ");
+        /*
+         * CPU exception – switch to white-on-red, dump the full register
+         * state, then call panic() which will disable interrupts and halt.
+         */
+        terminal_setcolor(VGA_COLOR_WHITE, VGA_COLOR_RED);
+        terminal_writestring("\n\n*** KERNEL EXCEPTION ***  INT #");
+        terminal_writehex32(regs->int_no);
+        terminal_writestring(": ");
         terminal_writestring(exception_messages[regs->int_no]);
-        terminal_writestring("\n");
-        panic("Unhandled CPU exception - system halted");
+        terminal_putchar('\n');
+        dump_registers(regs);
+        panic(exception_messages[regs->int_no]);
     } else if (regs->int_no < 48) {
         /*
          * Hardware IRQ (vectors 0x20-0x2F).
-         * Dispatch to a registered handler (if any), then send EOI.
+         *
+         * Check for spurious IRQ7 (master) and IRQ15 (slave) before
+         * dispatching.  A spurious IRQ must NOT receive a slave EOI;
+         * pic_is_spurious_irq15() sends the master EOI internally when
+         * needed and returns non-zero so we skip the slave EOI here.
          */
         uint8_t irq = (uint8_t)(regs->int_no - 32);
+
+        if (irq == 7  && pic_is_spurious_irq7())  return;
+        if (irq == 15 && pic_is_spurious_irq15()) return;
+
         if (irq_handlers[irq])
             irq_handlers[irq](regs);
+
         pic_send_eoi(irq);
     }
 }

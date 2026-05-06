@@ -11,7 +11,7 @@ LDFLAGS = -m32 -nostdlib -nostartfiles -nodefaultlibs -static -Wl,-Tlinker.ld
 
 OBJECTS = arch/boot.o \
           kernel/kernel.o kernel/gdt.o arch/gdt_flush.o kernel/idt.o arch/isr.o \
-          kernel/shell.o \
+          kernel/klog.o kernel/shell.o \
           drivers/pic.o drivers/terminal.o drivers/keyboard.o drivers/timer.o \
           mm/pmm.o mm/paging.o
 
@@ -39,6 +39,9 @@ kernel/idt.o: kernel/idt.c kernel/idt.h
 
 kernel/shell.o: kernel/shell.c kernel/shell.h
 	$(CC) $(CFLAGS) kernel/shell.c -o kernel/shell.o
+
+kernel/klog.o: kernel/klog.c kernel/klog.h
+	$(CC) $(CFLAGS) kernel/klog.c -o kernel/klog.o
 
 # ── drivers ─────────────────────────────────────────────────────────────
 drivers/pic.o: drivers/pic.c drivers/pic.h

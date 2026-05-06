@@ -62,3 +62,48 @@ void pic_unmask_irq(uint8_t irq) {
     mask = inb(port) & (uint8_t)(~(1u << irq));
     outb(port, mask);
 }
+
+void pic_mask_irq(uint8_t irq) {
+    uint16_t port;
+    uint8_t  mask;
+
+    if (irq < 8) {
+        port = PIC1_DATA;
+    } else {
+        port = PIC2_DATA;
+        irq -= 8;
+    }
+    mask = inb(port) | (uint8_t)(1u << irq);
+    outb(port, mask);
+}
+
+/*
+ * Read the In-Service Register of one PIC.
+ * Writing OCW3 with bit 1 set (0x0B) requests that the next read from the
+ * command port returns the ISR rather than the IRR.
+ * A set bit means that IRQ is currently being serviced; a clear bit for the
+ * highest-priority pending line means the interrupt was spurious.
+ */
+static uint8_t pic_read_isr(uint16_t cmd_port) {
+    outb(cmd_port, 0x0B);   /* OCW3: read ISR on next read */
+    return inb(cmd_port);
+}
+
+int pic_is_spurious_irq7(void) {
+    /* Spurious if master ISR bit 7 is clear */
+    return !(pic_read_isr(PIC1_CMD) & 0x80u);
+}
+
+int pic_is_spurious_irq15(void) {
+    /* Spurious if slave ISR bit 7 is clear */
+    if (!(pic_read_isr(PIC2_CMD) & 0x80u)) {
+        /*
+         * The master already acknowledged the cascade (IRQ2) pulse, so we
+         * must still send EOI to the master — but NOT to the slave, because
+         * the slave never actually raised an interrupt.
+         */
+        outb(PIC1_CMD, PIC_EOI);
+        return 1;
+    }
+    return 0;
+}

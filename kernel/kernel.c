@@ -8,6 +8,7 @@
 #include "keyboard.h"
 #include "timer.h"
 #include "shell.h"
+#include "klog.h"
 
 // Function prototypes
 void panic(const char* message);
@@ -31,32 +32,24 @@ void kernel_main(uint32_t mb_magic, multiboot_info_t *mbi) {
         panic("Not loaded by a multiboot-compliant bootloader");
 
     gdt_install();
-    terminal_writestring_colored("[ OK ]", VGA_COLOR_GREEN, VGA_COLOR_BLACK);
-    terminal_writestring(" GDT installed\n");
+    KLOG_INFO("GDT installed");
 
     idt_install();
-    terminal_writestring_colored("[ OK ]", VGA_COLOR_GREEN, VGA_COLOR_BLACK);
-    terminal_writestring(" IDT installed\n");
+    KLOG_INFO("IDT installed");
 
     pmm_init(mbi);
-    terminal_writestring_colored("[ OK ]", VGA_COLOR_GREEN, VGA_COLOR_BLACK);
-    terminal_writestring(" PMM initialized  free=0x");
-    terminal_writehex32(pmm_get_free_frames());
-    terminal_writestring(" total=0x");
-    terminal_writehex32(pmm_get_total_frames());
-    terminal_writestring(" frames\n");
+    KLOG_INFO("PMM initialized");
+    klog_hex(LOG_DEBUG, "  free  frames: ", pmm_get_free_frames());
+    klog_hex(LOG_DEBUG, "  total frames: ", pmm_get_total_frames());
 
     paging_init();
-    terminal_writestring_colored("[ OK ]", VGA_COLOR_GREEN, VGA_COLOR_BLACK);
-    terminal_writestring(" Paging enabled   identity-mapped first 4 MiB\n");
+    KLOG_INFO("Paging enabled  (identity-mapped first 4 MiB)");
 
     keyboard_init();
-    terminal_writestring_colored("[ OK ]", VGA_COLOR_GREEN, VGA_COLOR_BLACK);
-    terminal_writestring(" Keyboard driver ready\n");
+    KLOG_INFO("Keyboard driver ready");
 
     timer_init(100);
-    terminal_writestring_colored("[ OK ]", VGA_COLOR_GREEN, VGA_COLOR_BLACK);
-    terminal_writestring(" PIT timer @ 100 Hz\n");
+    KLOG_INFO("PIT timer running @ 100 Hz");
 
     __asm__ volatile("sti");
 
@@ -83,8 +76,12 @@ void kfree(void* ptr) {
 }
 
 void panic(const char* message) {
-    terminal_writestring_colored("[PANIC] ", VGA_COLOR_WHITE, VGA_COLOR_RED);
+    __asm__ volatile("cli");   /* disable interrupts – we are not coming back */
+    terminal_setcolor(VGA_COLOR_WHITE, VGA_COLOR_RED);
+    terminal_writestring("\n[PANIC] ");
     terminal_writestring(message);
     terminal_writestring("\nSystem halted.\n");
-    for(;;);
+    for (;;) {
+        __asm__ volatile("hlt");   /* power-efficient halt */
+    }
 }
