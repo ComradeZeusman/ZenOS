@@ -1,4 +1,6 @@
 #include "kernel_types.h"
+#include "gdt.h"
+#include "idt.h"
 
 #define MEMORY_END 0x1000000  // 16MB of memory
 #define PAGE_SIZE 4096
@@ -50,19 +52,36 @@ static uint32_t num_blocks = 0;
 
 // Kernel entry point
 void kernel_main() {
+    // Disable interrupts for the entire hardware-init sequence.
+    // The bootloader already executed CLI before the protected-mode switch,
+    // but we assert it here explicitly so the invariant is self-documenting.
+    __asm__ volatile("cli");
+
     // Initialize terminal for output
     terminal_initialize();
-    
+
     // Print welcome message
     terminal_writestring("ZenOS Kernel Initializing...\n");
-    
+
+    // Re-install the GDT from kernel space, replacing the bootloader's
+    // temporary copy that lives inside the now-reused first 512 bytes.
+    gdt_install();
+    terminal_writestring("GDT installed\n");
+
     // Initialize memory management
     init_memory();
     terminal_writestring("Memory management initialized\n");
+
+    // Set up the Interrupt Descriptor Table and load IDTR
+    idt_install();
+    terminal_writestring("IDT installed\n");
+
+    // Hardware init complete – re-enable interrupts.
+    __asm__ volatile("sti");
     
     // Prevent kernel from returning
     for(;;) {
-        __asm__("hlt");
+        __asm__ volatile("hlt");
     }
 }
 
