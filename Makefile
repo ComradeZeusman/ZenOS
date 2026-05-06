@@ -1,46 +1,59 @@
-CC = i686-elf-gcc
+CC      = i686-elf-gcc
 OBJCOPY = i686-elf-objcopy
 
-CFLAGS = -m32 -nostdlib -nostdinc -fno-builtin -fno-stack-protector -nostartfiles -nodefaultlibs -Wall -Wextra -c -ffreestanding
+# -I flags let every source file use plain #include "foo.h" regardless
+# of which subdirectory it lives in.
+CFLAGS  = -m32 -nostdlib -nostdinc -fno-builtin -fno-stack-protector \
+          -nostartfiles -nodefaultlibs -Wall -Wextra -c -ffreestanding \
+          -I include -I kernel -I drivers -I mm
+
 LDFLAGS = -m32 -nostdlib -nostartfiles -nodefaultlibs -static -Wl,-Tlinker.ld
 
-OBJECTS = boot.o kernel.o gdt.o gdt_flush.o idt.o isr.o pic.o pmm.o paging.o terminal.o keyboard.o
+OBJECTS = arch/boot.o \
+          kernel/kernel.o kernel/gdt.o arch/gdt_flush.o kernel/idt.o arch/isr.o \
+          drivers/pic.o drivers/terminal.o drivers/keyboard.o \
+          mm/pmm.o mm/paging.o
 
 all: kernel.elf
 
-boot.o: boot.asm
-	nasm -f elf32 boot.asm -o boot.o
+# ── arch ────────────────────────────────────────────────────────────────
+arch/boot.o: arch/boot.asm
+	nasm -f elf32 arch/boot.asm -o arch/boot.o
 
-kernel.o: kernel.c gdt.h idt.h multiboot.h pmm.h paging.h terminal.h keyboard.h
-	$(CC) $(CFLAGS) kernel.c -o kernel.o
+arch/gdt_flush.o: arch/gdt_flush.asm
+	nasm -f elf32 arch/gdt_flush.asm -o arch/gdt_flush.o
 
-gdt.o: gdt.c gdt.h
-	$(CC) $(CFLAGS) gdt.c -o gdt.o
+arch/isr.o: arch/isr.asm
+	nasm -f elf32 arch/isr.asm -o arch/isr.o
 
-gdt_flush.o: gdt_flush.asm
-	nasm -f elf32 gdt_flush.asm -o gdt_flush.o
+# ── kernel ──────────────────────────────────────────────────────────────
+kernel/kernel.o: kernel/kernel.c
+	$(CC) $(CFLAGS) kernel/kernel.c -o kernel/kernel.o
 
-idt.o: idt.c idt.h pic.h
-	$(CC) $(CFLAGS) idt.c -o idt.o
+kernel/gdt.o: kernel/gdt.c kernel/gdt.h
+	$(CC) $(CFLAGS) kernel/gdt.c -o kernel/gdt.o
 
-pic.o: pic.c pic.h port.h
-	$(CC) $(CFLAGS) pic.c -o pic.o
+kernel/idt.o: kernel/idt.c kernel/idt.h
+	$(CC) $(CFLAGS) kernel/idt.c -o kernel/idt.o
 
-pmm.o: pmm.c pmm.h multiboot.h kernel_types.h
-	$(CC) $(CFLAGS) pmm.c -o pmm.o
+# ── drivers ─────────────────────────────────────────────────────────────
+drivers/pic.o: drivers/pic.c drivers/pic.h
+	$(CC) $(CFLAGS) drivers/pic.c -o drivers/pic.o
 
-paging.o: paging.c paging.h kernel_types.h
-	$(CC) $(CFLAGS) paging.c -o paging.o
+drivers/terminal.o: drivers/terminal.c drivers/terminal.h
+	$(CC) $(CFLAGS) drivers/terminal.c -o drivers/terminal.o
 
-terminal.o: terminal.c terminal.h kernel_types.h
-	$(CC) $(CFLAGS) terminal.c -o terminal.o
+drivers/keyboard.o: drivers/keyboard.c drivers/keyboard.h
+	$(CC) $(CFLAGS) drivers/keyboard.c -o drivers/keyboard.o
 
-keyboard.o: keyboard.c keyboard.h idt.h pic.h port.h kernel_types.h
-	$(CC) $(CFLAGS) keyboard.c -o keyboard.o
+# ── mm ──────────────────────────────────────────────────────────────────
+mm/pmm.o: mm/pmm.c mm/pmm.h
+	$(CC) $(CFLAGS) mm/pmm.c -o mm/pmm.o
 
-isr.o: isr.asm
-	nasm -f elf32 isr.asm -o isr.o
+mm/paging.o: mm/paging.c mm/paging.h
+	$(CC) $(CFLAGS) mm/paging.c -o mm/paging.o
 
+# ── link ────────────────────────────────────────────────────────────────
 kernel.elf: $(OBJECTS)
 	$(CC) $(LDFLAGS) $(OBJECTS) -o kernel.elf
 
@@ -63,12 +76,12 @@ run-iso: zenos.iso
 kernel.bin: kernel.elf
 	$(OBJCOPY) -O binary kernel.elf kernel.bin
 
-bootloader.bin: bootloader.asm
-	nasm -f bin bootloader.asm -o bootloader.bin
+arch/bootloader.bin: arch/bootloader.asm
+	nasm -f bin arch/bootloader.asm -o arch/bootloader.bin
 
-os-image: bootloader.bin kernel.bin
-	copy /b bootloader.bin+kernel.bin os-image.bin
+os-image: arch/bootloader.bin kernel.bin
+	copy /b arch\bootloader.bin+kernel.bin os-image.bin
 
 clean:
-	del /Q *.o *.elf *.iso *.bin 2>nul
+	del /Q arch\*.o kernel\*.o drivers\*.o mm\*.o *.elf *.iso *.bin 2>nul
 	if exist isodir rmdir /S /Q isodir
