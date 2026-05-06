@@ -158,17 +158,24 @@ void idt_install(void) {
 
 /* ── IRQ handler table ───────────────────────────────────────────────── */
 static irq_handler_t irq_handlers[16];
+static exc_handler_t exc_handlers[32];
 
 void irq_register_handler(uint8_t irq, irq_handler_t handler) {
     if (irq < 16)
         irq_handlers[irq] = handler;
 }
 
+void exc_register_handler(uint8_t exc_no, exc_handler_t handler) {
+    if (exc_no < 32)
+        exc_handlers[exc_no] = handler;
+}
+
 void isr_handler(registers_t *regs) {
     if (regs->int_no < 32) {
         /*
-         * CPU exception – switch to white-on-red, dump the full register
-         * state, then call panic() which will disable interrupts and halt.
+         * CPU exception – switch to white-on-red, let any registered
+         * exception handler print extra details first (e.g. CR2 for #PF),
+         * then dump the full CPU state and halt.
          */
         terminal_setcolor(VGA_COLOR_WHITE, VGA_COLOR_RED);
         terminal_writestring("\n\n*** KERNEL EXCEPTION ***  INT #");
@@ -176,6 +183,11 @@ void isr_handler(registers_t *regs) {
         terminal_writestring(": ");
         terminal_writestring(exception_messages[regs->int_no]);
         terminal_putchar('\n');
+
+        /* Subsystem-specific extra diagnostics (may be NULL) */
+        if (exc_handlers[regs->int_no])
+            exc_handlers[regs->int_no](regs);
+
         dump_registers(regs);
         panic(exception_messages[regs->int_no]);
     } else if (regs->int_no < 48) {

@@ -67,4 +67,15 @@ extern void isr47(void);
 typedef void (*irq_handler_t)(registers_t *regs);
 void irq_register_handler(uint8_t irq, irq_handler_t handler);
 
+/*
+ * CPU exception handler registration.
+ * Subsystems call exc_register_handler(exc_no, fn) to receive a callback
+ * when the corresponding CPU exception fires (exc_no = 0-31) BEFORE the
+ * generic register-dump and panic.  The handler can print extra diagnostic
+ * information (e.g. CR2 for a page fault) and then return; the generic
+ * dump+panic always follows.  Pass NULL to unregister.
+ */
+typedef void (*exc_handler_t)(registers_t *regs);
+void exc_register_handler(uint8_t exc_no, exc_handler_t handler);
+
 #endif /* IDT_H */

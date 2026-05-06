@@ -4,6 +4,7 @@
 #include "multiboot.h"
 #include "pmm.h"
 #include "paging.h"
+#include "heap.h"
 #include "terminal.h"
 #include "keyboard.h"
 #include "timer.h"
@@ -12,8 +13,7 @@
 
 // Function prototypes
 void panic(const char* message);
-void* kmalloc(size_t size);
-void kfree(void* ptr);
+extern uint32_t _kernel_end;   /* linker symbol – end of kernel BSS */
 
 // Ensure kernel_main is not removed by the linker
 void kernel_main(uint32_t mb_magic, multiboot_info_t *mbi) __attribute__((used));
@@ -45,6 +45,10 @@ void kernel_main(uint32_t mb_magic, multiboot_info_t *mbi) {
     paging_init();
     KLOG_INFO("Paging enabled  (identity-mapped first 4 MiB)");
 
+    heap_init();
+    KLOG_INFO("Kernel heap initialised");
+    klog_hex(LOG_DEBUG, "  heap base: ", (uint32_t)&_kernel_end);
+
     keyboard_init();
     KLOG_INFO("Keyboard driver ready");
 
@@ -54,25 +58,6 @@ void kernel_main(uint32_t mb_magic, multiboot_info_t *mbi) {
     __asm__ volatile("sti");
 
     shell_run();   /* never returns */
-}
-
-/*
- * kmalloc / kfree – page-granular wrappers over the PMM.
- * A higher-level heap slab allocator can be layered on top later.
- */
-void* kmalloc(size_t size) {
-    if (size == 0) return NULL;
-    uint32_t addr = pmm_alloc_frame();
-    if (addr == 0) {
-        panic("kmalloc: out of physical memory");
-        return NULL;
-    }
-    return (void*)addr;
-}
-
-void kfree(void* ptr) {
-    if (!ptr) return;
-    pmm_free_frame((uint32_t)ptr);
 }
 
 void panic(const char* message) {

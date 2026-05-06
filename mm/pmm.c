@@ -19,8 +19,14 @@ extern uint32_t _kernel_end;
  */
 static uint32_t pmm_bitmap[PMM_MAX_FRAMES / 32];
 
-static uint32_t pmm_total_frames = 0;   /* total usable frames          */
-static uint32_t pmm_used_frames  = 0;   /* currently allocated frames   */
+static uint32_t pmm_total_frames  = 0;
+static uint32_t pmm_used_frames   = 0;
+/*
+ * Allocation hint: index of the bitmap word where the last successful
+ * alloc found a free bit.  Avoids rescanning the fully-used low frames
+ * on every allocation, giving O(1) amortised performance.
+ */
+static uint32_t pmm_first_free_word = 0;
 
 /* ── Internal bit helpers ──────────────────────────────────────────── */
 
@@ -39,14 +45,9 @@ static inline int bitmap_test(uint32_t frame)
     return !!(pmm_bitmap[frame >> 5] & (1u << (frame & 31u)));
 }
 
-/* ── Region helpers ────────────────────────────────────────────────── */
+/* ── Region helpers (public) ───────────────────────────────────────── */
 
-/*
- * Mark every page frame that overlaps [base, base+length) as free.
- * Both base and length are silently truncated to PMM_PAGE_SIZE
- * boundaries so only whole frames are touched.
- */
-static void pmm_free_region(uint32_t base, uint32_t length)
+void pmm_free_region(uint32_t base, uint32_t length)
 {
     /* Align base up to the next page boundary */
     uint32_t align = base & (PMM_PAGE_SIZE - 1u);
@@ -65,15 +66,13 @@ static void pmm_free_region(uint32_t base, uint32_t length)
         if (bitmap_test(frame)) {
             bitmap_clear(frame);
             pmm_used_frames--;
+            if ((frame >> 5) < pmm_first_free_word)
+                pmm_first_free_word = frame >> 5;
         }
     }
 }
 
-/*
- * Mark every page frame that overlaps [base, base+length) as used.
- * length is rounded up so partial pages at the end are also reserved.
- */
-static void pmm_reserve_region(uint32_t base, uint32_t length)
+void pmm_reserve_region(uint32_t base, uint32_t length)
 {
     uint32_t frame = base / PMM_PAGE_SIZE;
     uint32_t count = (length + PMM_PAGE_SIZE - 1u) / PMM_PAGE_SIZE;
@@ -157,19 +156,32 @@ void pmm_init(multiboot_info_t *mbi)
 
 uint32_t pmm_alloc_frame(void)
 {
-    uint32_t words = (pmm_total_frames + 31u) / 32u;
+    return pmm_alloc_frame_above(0);
+}
 
-    for (uint32_t i = 0; i < words; i++) {
+uint32_t pmm_alloc_frame_above(uint32_t min_addr)
+{
+    uint32_t start_word  = min_addr / PMM_PAGE_SIZE / 32u;
+    uint32_t words       = (pmm_total_frames + 31u) / 32u;
+
+    /* Start scanning from whichever is higher: hint or min_addr word. */
+    uint32_t scan_start = (pmm_first_free_word > start_word)
+                          ? pmm_first_free_word : start_word;
+
+    for (uint32_t i = scan_start; i < words; i++) {
         if (pmm_bitmap[i] == 0xFFFFFFFFu)
-            continue;   /* all 32 frames in this word are used – fast skip */
+            continue;
 
         for (uint32_t bit = 0; bit < 32u; bit++) {
             uint32_t frame = i * 32u + bit;
-            if (frame >= pmm_total_frames) return 0;   /* OOM */
+            if (frame >= pmm_total_frames) return 0;
+            uint32_t phys = frame * PMM_PAGE_SIZE;
+            if (phys < min_addr) continue;
             if (!bitmap_test(frame)) {
                 bitmap_set(frame);
                 pmm_used_frames++;
-                return frame * PMM_PAGE_SIZE;
+                pmm_first_free_word = i;   /* update hint */
+                return phys;
             }
         }
     }
@@ -183,6 +195,9 @@ void pmm_free_frame(uint32_t addr)
     if (bitmap_test(frame)) {
         bitmap_clear(frame);
         pmm_used_frames--;
+        /* Retreat hint so this frame becomes available again immediately. */
+        if ((frame >> 5) < pmm_first_free_word)
+            pmm_first_free_word = frame >> 5;
     }
 }
 

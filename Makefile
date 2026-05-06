@@ -13,7 +13,7 @@ OBJECTS = arch/boot.o \
           kernel/kernel.o kernel/gdt.o arch/gdt_flush.o kernel/idt.o arch/isr.o \
           kernel/klog.o kernel/shell.o \
           drivers/pic.o drivers/terminal.o drivers/keyboard.o drivers/timer.o \
-          mm/pmm.o mm/paging.o
+          mm/pmm.o mm/paging.o mm/heap.o
 
 all: kernel.elf
 
@@ -62,6 +62,9 @@ mm/pmm.o: mm/pmm.c mm/pmm.h
 
 mm/paging.o: mm/paging.c mm/paging.h
 	$(CC) $(CFLAGS) mm/paging.c -o mm/paging.o
+
+mm/heap.o: mm/heap.c mm/heap.h
+	$(CC) $(CFLAGS) mm/heap.c -o mm/heap.o
 
 # ── link ────────────────────────────────────────────────────────────────
 kernel.elf: $(OBJECTS)
