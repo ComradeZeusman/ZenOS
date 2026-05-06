@@ -1,80 +1,88 @@
 # ZenOS
 
-A minimalist, educational x86 operating system with a custom bootloader and kernel.
+A minimalist, educational x86 operating system built with a GRUB multiboot kernel.
 
 ## Overview
 
-ZenOS is a simple operating system developed from scratch for x86 architecture computers. It features a custom bootloader written in assembly and a kernel written in C, with basic memory management functionality. This project aims to provide a learning platform for operating system development concepts.
+ZenOS is a simple operating system developed from scratch for x86 architecture. It uses a GRUB-compatible multiboot entry point, a kernel written in C, GDT/IDT setup, PIC remapping, and a memory map parsed directly from the BIOS via the multiboot info structure.
 
 ## Features
 
-- Custom 16-bit to 32-bit bootloader
-- Protected mode kernel
-- Basic memory management (page tables, memory blocks)
-- Terminal output capabilities
-- Error handling system with panic function
-- Floppy disk compatibility
+- GRUB multiboot 1 compatible entry point
+- 32-bit protected mode kernel
+- GDT installed from kernel space
+- IDT with CPU exception handlers (ISRs 0–31)
+- 8259 PIC remapped (IRQs → vectors 0x20–0x2F)
+- Memory map from GRUB (`multiboot_mmap_entry_t`), falls back to `mem_upper`
+- Physical memory block allocator (`kmalloc` / `kfree`)
+- VGA text-mode terminal output
 
 ## Project Structure
 
-- **bootloader.asm**: Assembly code for the bootloader that loads the kernel
-- **kernel.c**: C code for the kernel with memory management and terminal functions
-- **kernel_types.h**: Type definitions used by the kernel
-- **linker.ld**: Linker script for kernel compilation
-- **Makefile**: Build automation for the operating system
+```
+boot.asm          Multiboot header + entry point (_start)
+kernel.c          Kernel main, terminal, memory allocator
+kernel_types.h    Primitive type definitions (uint32_t, etc.)
+multiboot.h       Multiboot 1 structures and constants
+gdt.h / gdt.c     Global Descriptor Table
+gdt_flush.asm     LGDT + segment register reload
+idt.h / idt.c     Interrupt Descriptor Table
+isr.asm           ISR stubs (exceptions 0-31, IRQs 0-15)
+pic.h / pic.c     8259 PIC remap and EOI helpers
+port.h            Inline outb / inb helpers
+linker.ld         Linker script (loads at 1 MB, exports _kernel_end)
+Makefile          Build + run targets
+grub.cfg          GRUB menu entry for ISO boot
+```
+
+## Prerequisites
+
+| Tool | Purpose |
+|------|---------|
+| `i686-elf-gcc` | Cross-compiler for the kernel |
+| `nasm` | Assembles `.asm` files |
+| `GNU make` | Build system |
+| `qemu-system-i386` | Run the OS in an emulator |
+| WSL + `grub-common` + `xorriso` | Only needed for `make iso` |
+
+Install WSL dependencies (one time):
+```sh
+sudo apt install grub-common xorriso
+```
 
 ## Building
 
-### Prerequisites
-
-To build ZenOS, you need:
-
-- GCC cross-compiler for i686-elf target
-- NASM assembler
-- GNU Make
-
-### Build Process
-
-To build the entire operating system:
-
-```
-make
-```
-
-This will:
-
-1. Compile the bootloader with NASM
-2. Compile the kernel with i686-elf-gcc
-3. Link everything together
-4. Create a bootable disk image (os-image.bin)
-
-To clean the build artifacts:
-
-```
-make clean
+```sh
+make          # compiles everything → kernel.elf
+make clean    # removes all build artifacts
 ```
 
 ## Running
 
-ZenOS can be run using an emulator like QEMU or written to physical media for testing on real hardware:
+### Quickest way — no ISO needed
 
+QEMU has built-in multiboot support and can load the ELF directly:
+
+```sh
+make run
+# equivalent to: qemu-system-i386 -kernel kernel.elf -m 32M
 ```
-qemu-system-i386 -fda os-image.bin
+
+### Bootable ISO via GRUB
+
+Builds `zenos.iso` using `grub-mkrescue` inside WSL:
+
+```sh
+make iso
 ```
 
-## Development
+### Boot the ISO in QEMU
 
-ZenOS is designed to be easy to extend. The current implementation provides:
-
-- A bootloader that switches from 16-bit real mode to 32-bit protected mode
-- Memory segmentation and paging setup
-- Basic terminal I/O capabilities
-- Kernel memory allocation functions (kmalloc/kfree)
+```sh
+make run-iso
+# equivalent to: qemu-system-i386 -cdrom zenos.iso -m 32M
+```
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Contributing
-
-Contributions are welcome! Feel free to submit pull requests or open issues to improve ZenOS.
+MIT — see [LICENSE](LICENSE).

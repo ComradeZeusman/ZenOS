@@ -1,6 +1,7 @@
 #include "kernel_types.h"
 #include "gdt.h"
 #include "idt.h"
+#include "multiboot.h"
 
 #define MEMORY_END 0x1000000  // 16MB of memory
 #define PAGE_SIZE 4096
@@ -9,14 +10,18 @@
 // Function prototypes
 void terminal_initialize(void);
 void terminal_writestring(const char* str);
+void terminal_writehex32(uint32_t value);
 void terminal_putchar(char c);
-void init_memory(void);
+void init_memory(multiboot_info_t *mbi);
 void panic(const char* message);
 void* kmalloc(size_t size);
 void kfree(void* ptr);
 
+/* Linker-exported end-of-kernel symbol (defined in linker.ld) */
+extern uint32_t _kernel_end;
+
 // Ensure kernel_main is not removed by the linker
-void kernel_main(void) __attribute__((used));
+void kernel_main(uint32_t mb_magic, multiboot_info_t *mbi) __attribute__((used));
 
 // Memory management structures
 typedef struct {
@@ -50,36 +55,29 @@ typedef struct {
 static memory_block_t memory_blocks[MAX_BLOCKS];
 static uint32_t num_blocks = 0;
 
-// Kernel entry point
-void kernel_main() {
-    // Disable interrupts for the entire hardware-init sequence.
-    // The bootloader already executed CLI before the protected-mode switch,
-    // but we assert it here explicitly so the invariant is self-documenting.
+// Kernel entry point – called by boot.asm after GRUB multiboot handoff.
+// mb_magic : must equal MULTIBOOT_BOOTLOADER_MAGIC (0x2BADB002)
+// mbi      : pointer to the multiboot_info_t structure filled by GRUB
+void kernel_main(uint32_t mb_magic, multiboot_info_t *mbi) {
     __asm__ volatile("cli");
 
-    // Initialize terminal for output
     terminal_initialize();
-
-    // Print welcome message
     terminal_writestring("ZenOS Kernel Initializing...\n");
 
-    // Re-install the GDT from kernel space, replacing the bootloader's
-    // temporary copy that lives inside the now-reused first 512 bytes.
+    if (mb_magic != MULTIBOOT_BOOTLOADER_MAGIC)
+        panic("Not loaded by a multiboot-compliant bootloader");
+
     gdt_install();
     terminal_writestring("GDT installed\n");
 
-    // Initialize memory management
-    init_memory();
-    terminal_writestring("Memory management initialized\n");
-
-    // Set up the Interrupt Descriptor Table and load IDTR
     idt_install();
     terminal_writestring("IDT installed\n");
 
-    // Hardware init complete – re-enable interrupts.
+    init_memory(mbi);
+    terminal_writestring("Memory management initialized\n");
+
     __asm__ volatile("sti");
-    
-    // Prevent kernel from returning
+
     for(;;) {
         __asm__ volatile("hlt");
     }
@@ -123,20 +121,100 @@ void terminal_writestring(const char* str) {
     }
 }
 
-// Memory management implementation
-void init_memory() {
-    // Initialize page directory
-    page_directory_t *kernel_directory = (page_directory_t*)0x9C000;
-    for(int i = 0; i < 1024; i++) {
-        kernel_directory->tables[i] = 0;
-        kernel_directory->physical_tables[i] = 0;
+/* Print a 32-bit value as "0xXXXXXXXX" */
+void terminal_writehex32(uint32_t value) {
+    static const char hex[] = "0123456789ABCDEF";
+    char buf[11];   /* "0x" + 8 hex digits + '\0' */
+    buf[0] = '0'; buf[1] = 'x';
+    for (int i = 9; i >= 2; i--) {
+        buf[i] = hex[value & 0xF];
+        value >>= 4;
     }
+    buf[10] = '\0';
+    terminal_writestring(buf);
+}
 
-    // Initialize physical memory manager
-    memory_blocks[0].start_address = 0x100000; // Start after 1MB
-    memory_blocks[0].size = MEMORY_END - 0x100000;
-    memory_blocks[0].used = 0;
-    num_blocks = 1;
+// Memory management implementation
+void init_memory(multiboot_info_t *mbi) {
+    num_blocks = 0;
+    terminal_writestring("Memory map:\n");
+
+    if (mbi->flags & MULTIBOOT_INFO_MMAP) {
+        /*
+         * Parse the BIOS memory map provided by GRUB.
+         * We only add page-aligned available regions above 1 MB
+         * and above the kernel image itself to the allocator.
+         */
+        uint32_t kend = ((uint32_t)&_kernel_end + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+        multiboot_mmap_entry_t *entry   = (multiboot_mmap_entry_t*)(mbi->mmap_addr);
+        multiboot_mmap_entry_t *map_end = (multiboot_mmap_entry_t*)(mbi->mmap_addr + mbi->mmap_length);
+
+        while (entry < map_end) {
+            /* Print the raw BIOS region */
+            terminal_writestring("  ");
+            terminal_writehex32(entry->base_low);
+            terminal_writestring(" - ");
+            terminal_writehex32(entry->base_low + entry->length_low - 1);
+            terminal_writestring(entry->type == MULTIBOOT_MEMORY_AVAILABLE
+                                 ? " [Available]\n" : " [Reserved]\n");
+
+            if (entry->type == MULTIBOOT_MEMORY_AVAILABLE && num_blocks < MAX_BLOCKS) {
+                uint32_t base = entry->base_low;
+                uint32_t size = entry->length_low;
+                int valid = 1;
+
+                /* Skip / trim everything below 1 MB */
+                if (base + size <= 0x100000) {
+                    valid = 0;
+                } else if (base < 0x100000) {
+                    size -= (0x100000 - base);
+                    base  = 0x100000;
+                }
+
+                /* Skip / trim the kernel image */
+                if (valid && base + size <= kend) {
+                    valid = 0;
+                } else if (valid && base < kend) {
+                    size -= (kend - base);
+                    base  = kend;
+                }
+
+                if (valid) {
+                    /* Align base up and size down to page boundaries */
+                    uint32_t aligned = (base + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+                    uint32_t trim    = aligned - base;
+                    if (size > trim) {
+                        size -= trim;
+                        base  = aligned;
+                        size &= ~(PAGE_SIZE - 1);
+                        if (size > 0) {
+                            memory_blocks[num_blocks].start_address = base;
+                            memory_blocks[num_blocks].size          = size;
+                            memory_blocks[num_blocks].used          = 0;
+                            num_blocks++;
+                        }
+                    }
+                }
+            }
+
+            entry = (multiboot_mmap_entry_t*)
+                    ((uint32_t)entry + entry->size + (uint32_t)sizeof(entry->size));
+        }
+    } else if (mbi->flags & MULTIBOOT_INFO_MEM) {
+        /* Fallback: mem_upper = KB of RAM above 1 MB */
+        terminal_writestring("  (mem_upper fallback)\n");
+        memory_blocks[0].start_address = 0x100000;
+        memory_blocks[0].size          = mbi->mem_upper * 1024;
+        memory_blocks[0].used          = 0;
+        num_blocks = 1;
+    } else {
+        /* Last resort: hardcoded 16 MB */
+        terminal_writestring("  (hardcoded fallback)\n");
+        memory_blocks[0].start_address = 0x100000;
+        memory_blocks[0].size          = MEMORY_END - 0x100000;
+        memory_blocks[0].used          = 0;
+        num_blocks = 1;
+    }
 }
 
 void* kmalloc(size_t size) {
