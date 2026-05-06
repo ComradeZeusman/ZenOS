@@ -130,6 +130,14 @@ void idt_install(void) {
     __asm__ volatile("lidt %0" : : "m"(idt_ptr));
 }
 
+/* ── IRQ handler table ───────────────────────────────────────────────── */
+static irq_handler_t irq_handlers[16];
+
+void irq_register_handler(uint8_t irq, irq_handler_t handler) {
+    if (irq < 16)
+        irq_handlers[irq] = handler;
+}
+
 void isr_handler(registers_t *regs) {
     if (regs->int_no < 32) {
         /* CPU exception */
@@ -140,10 +148,11 @@ void isr_handler(registers_t *regs) {
     } else if (regs->int_no < 48) {
         /*
          * Hardware IRQ (vectors 0x20-0x2F).
-         * All IRQ lines are masked after pic_remap(), so we only get here
-         * if a specific IRQ has been unmasked.  Send EOI so the PIC
-         * accepts future interrupts on this line.
+         * Dispatch to a registered handler (if any), then send EOI.
          */
-        pic_send_eoi((uint8_t)(regs->int_no - 32));
+        uint8_t irq = (uint8_t)(regs->int_no - 32);
+        if (irq_handlers[irq])
+            irq_handlers[irq](regs);
+        pic_send_eoi(irq);
     }
 }

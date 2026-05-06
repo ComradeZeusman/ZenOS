@@ -58,4 +58,13 @@ extern void isr41(void);  extern void isr42(void);  extern void isr43(void);
 extern void isr44(void);  extern void isr45(void);  extern void isr46(void);
 extern void isr47(void);
 
+/*
+ * IRQ handler registration.
+ * Drivers call irq_register_handler(irq_line, fn) to receive a callback
+ * whenever the corresponding hardware IRQ fires (irq = 0-15).
+ * Pass NULL to unregister.
+ */
+typedef void (*irq_handler_t)(registers_t *regs);
+void irq_register_handler(uint8_t irq, irq_handler_t handler);
+
 #endif /* IDT_H */

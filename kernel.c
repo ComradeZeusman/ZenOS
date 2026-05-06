@@ -5,6 +5,7 @@
 #include "pmm.h"
 #include "paging.h"
 #include "terminal.h"
+#include "keyboard.h"
 
 // Function prototypes
 void panic(const char* message);
@@ -47,10 +48,27 @@ void kernel_main(uint32_t mb_magic, multiboot_info_t *mbi) {
     terminal_writestring_colored("[ OK ]", VGA_COLOR_GREEN, VGA_COLOR_BLACK);
     terminal_writestring(" Paging enabled   identity-mapped first 4 MiB\n");
 
+    keyboard_init();
+    terminal_writestring_colored("[ OK ]", VGA_COLOR_GREEN, VGA_COLOR_BLACK);
+    terminal_writestring(" Keyboard driver ready\n");
+
     __asm__ volatile("sti");
+
+    terminal_writestring("\n> ");
 
     for(;;) {
         __asm__ volatile("hlt");
+        char c = keyboard_getchar();
+        if (c) {
+            if (c == '\b') {
+                /* simple backspace: overwrite last char with space */
+                terminal_writestring("\b \b");
+            } else {
+                terminal_putchar(c);
+                if (c == '\n')
+                    terminal_writestring("> ");
+            }
+        }
     }
 }
 

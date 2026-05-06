@@ -76,6 +76,15 @@ void terminal_putchar(char c)
         case '\r':
             terminal_col = 0;
             break;
+        case '\b':
+            if (terminal_col > 0) {
+                terminal_col--;
+            } else if (terminal_row > 0) {
+                terminal_row--;
+                terminal_col = VGA_WIDTH - 1u;
+            }
+            put_entry(terminal_row, terminal_col, ' ', terminal_color);
+            break;
         case '\t':
             /* Advance to the next 8-column tab stop. */
             terminal_col = (uint16_t)((terminal_col + 8u) & ~7u);
