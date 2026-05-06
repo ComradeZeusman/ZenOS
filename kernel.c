@@ -3,14 +3,10 @@
 #include "idt.h"
 #include "multiboot.h"
 #include "pmm.h"
-
-#define ERROR_STRING "\033[31m[ERROR]\033[0m "
+#include "paging.h"
+#include "terminal.h"
 
 // Function prototypes
-void terminal_initialize(void);
-void terminal_writestring(const char* str);
-void terminal_writehex32(uint32_t value);
-void terminal_putchar(char c);
 void panic(const char* message);
 void* kmalloc(size_t size);
 void kfree(void* ptr);
@@ -25,80 +21,37 @@ void kernel_main(uint32_t mb_magic, multiboot_info_t *mbi) {
     __asm__ volatile("cli");
 
     terminal_initialize();
-    terminal_writestring("ZenOS Kernel Initializing...\n");
+    terminal_writestring_colored("ZenOS", VGA_COLOR_CYAN, VGA_COLOR_BLACK);
+    terminal_writestring(" Kernel Initializing...\n");
 
     if (mb_magic != MULTIBOOT_BOOTLOADER_MAGIC)
         panic("Not loaded by a multiboot-compliant bootloader");
 
     gdt_install();
-    terminal_writestring("GDT installed\n");
+    terminal_writestring_colored("[ OK ]", VGA_COLOR_GREEN, VGA_COLOR_BLACK);
+    terminal_writestring(" GDT installed\n");
 
     idt_install();
-    terminal_writestring("IDT installed\n");
+    terminal_writestring_colored("[ OK ]", VGA_COLOR_GREEN, VGA_COLOR_BLACK);
+    terminal_writestring(" IDT installed\n");
 
     pmm_init(mbi);
-    terminal_writestring("PMM initialized  free=0x");
+    terminal_writestring_colored("[ OK ]", VGA_COLOR_GREEN, VGA_COLOR_BLACK);
+    terminal_writestring(" PMM initialized  free=0x");
     terminal_writehex32(pmm_get_free_frames());
     terminal_writestring(" total=0x");
     terminal_writehex32(pmm_get_total_frames());
     terminal_writestring(" frames\n");
+
+    paging_init();
+    terminal_writestring_colored("[ OK ]", VGA_COLOR_GREEN, VGA_COLOR_BLACK);
+    terminal_writestring(" Paging enabled   identity-mapped first 4 MiB\n");
 
     __asm__ volatile("sti");
 
     for(;;) {
         __asm__ volatile("hlt");
     }
-}
-
-// Basic terminal output functions
-static uint16_t* terminal_buffer;
-static uint16_t terminal_row;
-static uint16_t terminal_column;
-
-void terminal_initialize() {
-    terminal_buffer = (uint16_t*) 0xB8000;
-    terminal_row = 0;
-    terminal_column = 0;
-    
-    // Clear screen
-    for (int i = 0; i < 80 * 25; i++) {
-        terminal_buffer[i] = (uint16_t) ' ' | (uint16_t) 0x0F << 8;
-    }
-}
-
-void terminal_putchar(char c) {
-    if (c == '\n') {
-        terminal_column = 0;
-        terminal_row++;
-        return;
-    }
-    
-    terminal_buffer[terminal_row * 80 + terminal_column] = (uint16_t) c | (uint16_t) 0x0F << 8;
-    terminal_column++;
-    
-    if (terminal_column >= 80) {
-        terminal_column = 0;
-        terminal_row++;
-    }
-}
-
-void terminal_writestring(const char* str) {
-    for (size_t i = 0; str[i] != '\0'; i++) {
-        terminal_putchar(str[i]);
-    }
-}
-
-/* Print a 32-bit value as "0xXXXXXXXX" */
-void terminal_writehex32(uint32_t value) {
-    static const char hex[] = "0123456789ABCDEF";
-    char buf[11];   /* "0x" + 8 hex digits + '\0' */
-    buf[0] = '0'; buf[1] = 'x';
-    for (int i = 9; i >= 2; i--) {
-        buf[i] = hex[value & 0xF];
-        value >>= 4;
-    }
-    buf[10] = '\0';
-    terminal_writestring(buf);
 }
 
 /*
@@ -121,7 +74,7 @@ void kfree(void* ptr) {
 }
 
 void panic(const char* message) {
-    terminal_writestring(ERROR_STRING);
+    terminal_writestring_colored("[PANIC] ", VGA_COLOR_WHITE, VGA_COLOR_RED);
     terminal_writestring(message);
     terminal_writestring("\nSystem halted.\n");
     for(;;);
