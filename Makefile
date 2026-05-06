@@ -4,7 +4,7 @@ OBJCOPY = i686-elf-objcopy
 CFLAGS = -m32 -nostdlib -nostdinc -fno-builtin -fno-stack-protector -nostartfiles -nodefaultlibs -Wall -Wextra -c -ffreestanding
 LDFLAGS = -m32 -nostdlib -nostartfiles -nodefaultlibs -static -Wl,-Tlinker.ld
 
-OBJECTS = boot.o kernel.o gdt.o gdt_flush.o idt.o isr.o pic.o
+OBJECTS = boot.o kernel.o gdt.o gdt_flush.o idt.o isr.o pic.o pmm.o
 
 all: kernel.elf
 
@@ -25,6 +25,9 @@ idt.o: idt.c idt.h pic.h
 
 pic.o: pic.c pic.h port.h
 	$(CC) $(CFLAGS) pic.c -o pic.o
+
+pmm.o: pmm.c pmm.h multiboot.h kernel_types.h
+	$(CC) $(CFLAGS) pmm.c -o pmm.o
 
 isr.o: isr.asm
 	nasm -f elf32 isr.asm -o isr.o
