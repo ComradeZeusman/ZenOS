@@ -6,6 +6,7 @@
 #include "paging.h"
 #include "terminal.h"
 #include "keyboard.h"
+#include "timer.h"
 
 // Function prototypes
 void panic(const char* message);
@@ -51,6 +52,10 @@ void kernel_main(uint32_t mb_magic, multiboot_info_t *mbi) {
     keyboard_init();
     terminal_writestring_colored("[ OK ]", VGA_COLOR_GREEN, VGA_COLOR_BLACK);
     terminal_writestring(" Keyboard driver ready\n");
+
+    timer_init(100);
+    terminal_writestring_colored("[ OK ]", VGA_COLOR_GREEN, VGA_COLOR_BLACK);
+    terminal_writestring(" PIT timer @ 100 Hz\n");
 
     __asm__ volatile("sti");
 
